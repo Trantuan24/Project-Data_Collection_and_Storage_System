@@ -1,0 +1,3 @@
+2025-01-17 14:13:30,843 - INFO - Scraping complete. Data saved to /tmp/tmpdz9z1lrj.csv.
+2025-01-17 14:13:30,845 - INFO - Processing job link: https://example.com/job1
+2025-01-17 14:13:30,846 - INFO - Processing page 1 from URL: https://www.timesjobs.com/jobfunction/it-software-jobs/&sequence=1&startPage=1

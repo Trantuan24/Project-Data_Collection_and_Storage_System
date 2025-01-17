@@ -1,0 +1,37 @@
+2025-01-17 14:13:51,104 - INFO - Setting up sample data for tests.
+2025-01-17 14:13:51,105 - INFO - Testing clean_column function.
+2025-01-17 14:13:51,107 - INFO - Cleaning column 'Qualification'
+2025-01-17 14:13:51,107 - INFO - Tearing down after tests.
+2025-01-17 14:13:51,107 - INFO - Setting up sample data for tests.
+2025-01-17 14:13:51,108 - INFO - Testing clean_company_name function.
+2025-01-17 14:13:51,108 - INFO - Tearing down after tests.
+2025-01-17 14:13:51,108 - INFO - Setting up sample data for tests.
+2025-01-17 14:13:51,109 - INFO - Testing clean_experience_column function.
+2025-01-17 14:13:51,109 - INFO - Cleaning 'Experience' column
+2025-01-17 14:13:51,110 - INFO - Tearing down after tests.
+2025-01-17 14:13:51,110 - INFO - Setting up sample data for tests.
+2025-01-17 14:13:51,110 - INFO - Testing clean_job_id_column function.
+2025-01-17 14:13:51,110 - INFO - Cleaning 'Job ID' column
+2025-01-17 14:13:51,112 - INFO - Tearing down after tests.
+2025-01-17 14:13:51,112 - INFO - Setting up sample data for tests.
+2025-01-17 14:13:51,112 - INFO - Testing clean_qualification function.
+2025-01-17 14:13:51,112 - INFO - Tearing down after tests.
+2025-01-17 14:13:51,112 - INFO - Setting up sample data for tests.
+2025-01-17 14:13:51,112 - INFO - Testing clean_title function.
+2025-01-17 14:13:51,113 - INFO - Tearing down after tests.
+2025-01-17 14:13:51,113 - INFO - Setting up sample data for tests.
+2025-01-17 14:13:51,113 - INFO - Testing drop_column_hiring_location function.
+2025-01-17 14:13:51,113 - INFO - Dropping column 'Hiring Location' if it exists
+2025-01-17 14:13:51,114 - INFO - Tearing down after tests.
+2025-01-17 14:13:51,114 - INFO - Setting up sample data for tests.
+2025-01-17 14:13:51,114 - INFO - Testing drop_nan_job_id function.
+2025-01-17 14:13:51,114 - INFO - Dropping rows with missing 'Job ID'
+2025-01-17 14:13:51,115 - INFO - Tearing down after tests.
+2025-01-17 14:13:51,115 - INFO - Setting up sample data for tests.
+2025-01-17 14:13:51,116 - INFO - Testing fill_column_nan function.
+2025-01-17 14:13:51,116 - INFO - Filling missing values in column 'Salary' with 'Not Disclosed'
+2025-01-17 14:13:51,117 - INFO - Tearing down after tests.
+2025-01-17 14:13:51,117 - INFO - Setting up sample data for tests.
+2025-01-17 14:13:51,117 - INFO - Testing infer_roles function.
+2025-01-17 14:13:51,118 - INFO - Inferring roles for missing values in 'Role' column
+2025-01-17 14:13:51,119 - INFO - Tearing down after tests.
