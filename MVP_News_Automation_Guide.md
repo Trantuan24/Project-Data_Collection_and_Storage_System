@@ -8,17 +8,18 @@
 - ✅ Đọc URLs từ Google Sheets
 - ✅ Nhận URLs từ WhatsApp messages (đơn giản)
 - ✅ Crawl nội dung tin tức cơ bản
-- ✅ Lưu vào SQLite database
+- ✅ Lưu vào MySQL database
 - ✅ Tóm tắt bằng OpenAI API
 - ✅ Gửi kết quả qua WhatsApp (primary output)
 
 **Timeline:**
 - ⏰ Pre-requisites & Setup: 45 phút
+- ⏰ MySQL Database Setup: 30 phút
 - ⏰ WhatsApp Basic Setup: 60 phút
 - ⏰ n8n Workflow Creation: 120 phút
 - ⏰ Testing & Debugging: 90 phút
 - ⏰ Deployment & Validation: 45 phút
-- **Total:** 6 giờ (realistic cho MVP)
+- **Total:** 6.5 giờ (realistic cho MVP)
 
 ---
 
@@ -61,7 +62,34 @@
 5. Share sheet với service account email (từ file JSON)
 6. Copy Sheet ID từ URL (phần giữa `/d/` và `/edit`)
 
-**Bước 1.4: Đăng ký OpenAI API (8 phút)**
+**Bước 1.4: Setup MySQL Database (15 phút)**
+1. **Option A: Local MySQL Installation**
+   - Download MySQL Community Server: https://dev.mysql.com/downloads/mysql/
+   - Install với default settings
+   - Set root password: `news_automation_2024`
+   - Start MySQL service
+
+2. **Option B: XAMPP (Recommended cho Windows)**
+   - Download XAMPP: https://www.apachefriends.org/
+   - Install và start Apache + MySQL
+   - Access phpMyAdmin: http://localhost/phpmyadmin
+
+3. **Create Database:**
+   ```sql
+   CREATE DATABASE news_automation;
+   CREATE USER 'n8n_user'@'localhost' IDENTIFIED BY 'n8n_password';
+   GRANT ALL PRIVILEGES ON news_automation.* TO 'n8n_user'@'localhost';
+   FLUSH PRIVILEGES;
+   ```
+
+4. **Test Connection:**
+   - Host: localhost
+   - Port: 3306
+   - Database: news_automation
+   - Username: n8n_user
+   - Password: n8n_password
+
+**Bước 1.5: Đăng ký OpenAI API (8 phút)**
 1. Truy cập: https://platform.openai.com/
 2. Đăng ký account hoặc login
 3. Vào **API Keys** section
@@ -69,7 +97,7 @@
 5. Copy và lưu API key (bắt đầu với `sk-`)
 6. Kiểm tra credit balance (cần ít nhất $1)
 
-**Bước 1.5: Setup WhatsApp Business API (15 phút)**
+**Bước 1.6: Setup WhatsApp Business API (15 phút)**
 > **Lưu ý:** Đây là primary output channel cho MVP
 
 **WhatsApp Business API Setup:**
@@ -95,6 +123,67 @@ curl -X POST "https://graph.facebook.com/v18.0/PHONE_NUMBER_ID/messages" \
 1. Sử dụng ngrok: `ngrok http 5678`
 2. Configure webhook URL trong Meta Console
 3. Set verify token: `your_verify_token`
+
+---
+
+## 🗄️ PHẦN 2: MYSQL DATABASE SETUP (30 PHÚT)
+
+### 📊 Database Schema Creation
+
+**Bước 2.1: Create Database Tables (15 phút)**
+1. Access MySQL (phpMyAdmin hoặc MySQL Workbench)
+2. Select database `news_automation`
+3. Execute following SQL:
+
+```sql
+-- Articles table để lưu tin tức đã crawl
+CREATE TABLE articles (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    url VARCHAR(500) NOT NULL UNIQUE,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    crawled_at DATETIME NOT NULL,
+    word_count INT DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_url (url),
+    INDEX idx_created_at (created_at)
+);
+
+-- Daily summaries table
+CREATE TABLE daily_summaries (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    summary_date DATE NOT NULL UNIQUE,
+    summary_content TEXT NOT NULL,
+    article_count INT DEFAULT 0,
+    generated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_summary_date (summary_date)
+);
+
+-- URL tracking table
+CREATE TABLE url_queue (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    url VARCHAR(500) NOT NULL UNIQUE,
+    source VARCHAR(50) DEFAULT 'sheets',
+    added_by VARCHAR(100),
+    status VARCHAR(20) DEFAULT 'pending',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    processed_at DATETIME NULL,
+    INDEX idx_status (status),
+    INDEX idx_created_at (created_at)
+);
+```
+
+**Bước 2.2: Test Database Connection trong n8n (15 phút)**
+1. Trong n8n, tạo workflow test: `MySQL Connection Test`
+2. Thêm **MySQL** node
+3. Configure connection:
+   - Host: `localhost`
+   - Port: `3306`
+   - Database: `news_automation`
+   - User: `n8n_user`
+   - Password: `n8n_password`
+4. Test với query: `SELECT 1 as test`
+5. Verify connection successful
 
 ---
 
@@ -151,16 +240,16 @@ return items;
 
 ---
 
-## �🔧 PHẦN 3: N8N WORKFLOW CREATION (120 PHÚT)
+## �🔧 PHẦN 4: N8N WORKFLOW CREATION (120 PHÚT)
 
 ### 📊 Workflow 1: URL Collection từ Google Sheets (20 phút)
 
-**Bước 2.1: Tạo Workflow mới**
+**Bước 4.1: Tạo Workflow mới**
 1. Trong n8n, click **New Workflow**
 2. Đặt tên: `News URL Collection`
 3. Click **Save**
 
-**Bước 2.2: Thêm Google Sheets Node**
+**Bước 4.2: Thêm Google Sheets Node**
 1. Click dấu **+** để thêm node
 2. Tìm và chọn **Google Sheets**
 3. Click **Add Google Sheets node**
@@ -268,37 +357,37 @@ return items;
 
 ### 💾 Workflow 3: Database Storage (20 phút)
 
-**Bước 2.9: Thêm SQLite Node**
-1. Thêm **SQLite** node
+**Bước 3.9: Thêm MySQL Node**
+1. Thêm **MySQL** node
 2. Settings:
-   - **Database**: `./news_database.db`
+   - **Credential**: Use credential từ bước 2.2
    - **Operation**: Execute Query
    - **Query**:
 ```sql
-CREATE TABLE IF NOT EXISTS articles (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  url TEXT UNIQUE,
-  title TEXT,
-  content TEXT,
-  crawled_at TEXT,
-  word_count INTEGER,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-INSERT OR REPLACE INTO articles (url, title, content, crawled_at, word_count)
-VALUES (?, ?, ?, ?, ?);
+INSERT INTO articles (url, title, content, crawled_at, word_count)
+VALUES (?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+  title = VALUES(title),
+  content = VALUES(content),
+  crawled_at = VALUES(crawled_at),
+  word_count = VALUES(word_count);
 ```
 
-**Bước 2.10: Thêm Function Node để prepare SQL parameters**
+**Bước 3.10: Thêm Function Node để prepare SQL parameters**
 ```javascript
-// Prepare data cho SQLite insertion
+// Prepare data cho MySQL insertion
 const items = [];
 
 for (const item of $input.all()) {
   items.push({
     json: {
-      query: `INSERT OR REPLACE INTO articles (url, title, content, crawled_at, word_count) 
-              VALUES (?, ?, ?, ?, ?)`,
+      query: `INSERT INTO articles (url, title, content, crawled_at, word_count)
+              VALUES (?, ?, ?, ?, ?)
+              ON DUPLICATE KEY UPDATE
+                title = VALUES(title),
+                content = VALUES(content),
+                crawled_at = VALUES(crawled_at),
+                word_count = VALUES(word_count)`,
       parameters: [
         item.json.url,
         item.json.title,
@@ -352,18 +441,18 @@ return [{
 
 ---
 
-## � PHẦN 4: WHATSAPP OUTPUT CONFIGURATION (20 PHÚT)
+## � PHẦN 5: WHATSAPP OUTPUT CONFIGURATION (20 PHÚT)
 
 ### 📮 Setup WhatsApp Message Node (20 phút)
 
-**Bước 4.1: Thêm WhatsApp Business Node**
+**Bước 5.1: Thêm WhatsApp Business Node**
 1. Thêm **WhatsApp Business** node
 2. Settings:
    - **Credential**: Use credential từ bước 2.2
    - **Resource**: Message
    - **Operation**: Send Text
 
-**Bước 4.2: Configure WhatsApp Message Content**
+**Bước 5.2: Configure WhatsApp Message Content**
 ```javascript
 // WhatsApp message settings
 {
@@ -384,14 +473,14 @@ return [{
 }
 ```
 
-**Bước 4.3: Test WhatsApp Delivery**
+**Bước 5.3: Test WhatsApp Delivery**
 1. Click **Test step** để gửi thử message
 2. Kiểm tra WhatsApp nhận được message
 3. Verify format hiển thị đúng
 
 ---
 
-## 🔄 PHẦN 4: WORKFLOW AUTOMATION & SCHEDULING
+## 🔄 PHẦN 6: WORKFLOW AUTOMATION & SCHEDULING
 
 ### ⏰ Thêm Schedule Trigger (10 phút)
 
@@ -409,8 +498,8 @@ return [{
    - Function → HTTP Request
    - HTTP Request → HTML Extract
    - HTML Extract → Function (Clean Data)
-   - Function → SQLite
-   - SQLite → OpenAI
+   - Function → MySQL
+   - MySQL → OpenAI
    - OpenAI → Function (Format Summary)
    - Function → WhatsApp Business (Send Message)
 
@@ -420,7 +509,7 @@ return [{
 
 ---
 
-## 🧪 PHẦN 6: TESTING & DEBUGGING (90 PHÚT)
+## 🧪 PHẦN 7: TESTING & DEBUGGING (90 PHÚT)
 
 ### 🔍 Test Individual Nodes (30 phút)
 
@@ -450,13 +539,14 @@ return [{
    - Empty title: Thử selector `h1, .title, [class*="title"]`
    - No content: Thử selector `.content, .article, main p`
 
-**Bước 5.4: Test Database Storage**
-1. Click vào SQLite node
+**Bước 6.4: Test Database Storage**
+1. Click vào MySQL node
 2. Click **Test step**
 3. **Expected Output**: Success message
 4. **Troubleshooting**:
-   - Permission error: Kiểm tra write permissions
-   - SQL syntax: Kiểm tra query format
+   - Connection error: Kiểm tra MySQL service running
+   - Authentication error: Verify username/password
+   - SQL syntax: Kiểm tra MySQL query format
 
 **Bước 6.5: Test AI Summarization**
 1. Click vào OpenAI node
@@ -520,7 +610,7 @@ try {
 
 ---
 
-## 🚀 PHẦN 7: DEPLOYMENT & VALIDATION (45 PHÚT)
+## 🚀 PHẦN 8: DEPLOYMENT & VALIDATION (45 PHÚT)
 
 ### ✅ Production Checklist (25 phút)
 
@@ -528,7 +618,7 @@ try {
 1. Google Sheets: ✅ Reading URLs successfully
 2. WhatsApp Input: ✅ Receiving URLs (if enabled)
 3. Web Crawling: ✅ Extracting content
-4. Database: ✅ Storing articles
+4. MySQL Database: ✅ Storing articles
 5. AI: ✅ Generating summaries
 6. WhatsApp Output: ✅ Sending notifications
 
@@ -581,7 +671,7 @@ try {
 ### 🛠️ Technical Debt
 
 **Priority Fixes:**
-1. Replace SQLite với PostgreSQL
+1. Optimize MySQL performance với indexing
 2. Add proper logging system
 3. Implement rate limiting
 4. Add data validation
@@ -596,9 +686,19 @@ try {
 
 ## 🆘 TROUBLESHOOTING GUIDE
 
-### Top 5 Common Issues
+### Top 6 Common Issues
 
-**1. "Google Sheets permission denied"**
+**1. "MySQL connection failed"**
+```
+Solution:
+- Verify MySQL service is running
+- Check connection credentials (host, port, username, password)
+- Test connection outside n8n first
+- Ensure database 'news_automation' exists
+- Check firewall settings
+```
+
+**2. "Google Sheets permission denied"**
 ```
 Solution:
 - Kiểm tra service account email đã được share sheet
@@ -606,7 +706,7 @@ Solution:
 - Re-download credentials JSON
 ```
 
-**2. "OpenAI API rate limit exceeded"**
+**3. "OpenAI API rate limit exceeded"**
 ```
 Solution:
 - Đợi 1 phút và retry
@@ -614,7 +714,7 @@ Solution:
 - Add delay giữa requests
 ```
 
-**3. "HTTP Request timeout"**
+**4. "HTTP Request timeout"**
 ```
 Solution:
 - Tăng timeout lên 15000ms
@@ -622,15 +722,16 @@ Solution:
 - Check website accessibility
 ```
 
-**4. "Email authentication failed"**
+**5. "MySQL query syntax error"**
 ```
 Solution:
-- Verify Gmail App Password
-- Enable 2-factor authentication
-- Try different SMTP provider
+- Check MySQL syntax (different from SQLite)
+- Verify table exists
+- Check column names match schema
+- Use MySQL-specific functions
 ```
 
-**5. "Workflow execution failed"**
+**6. "Workflow execution failed"**
 ```
 Solution:
 - Check Executions tab for error details
@@ -647,9 +748,25 @@ Solution:
 Get-Content "C:\Users\[username]\.n8n\logs\n8n.log" -Tail 50
 ```
 
-**Test database connection:**
+**Test MySQL database connection:**
 ```sql
+-- Test connection
+SELECT 1 as connection_test;
+
+-- Check tables exist
+SHOW TABLES;
+
+-- Check recent articles
 SELECT * FROM articles ORDER BY created_at DESC LIMIT 5;
+
+-- Check database size
+SELECT
+    table_name,
+    table_rows,
+    data_length,
+    index_length
+FROM information_schema.tables
+WHERE table_schema = 'news_automation';
 ```
 
 **Verify workflow status:**
@@ -670,7 +787,7 @@ Bạn đã hoàn thành MVP hệ thống tự động hóa tin tức với Whats
 - ✅ Web crawling và content extraction
 - ✅ AI-powered summarization
 - ✅ WhatsApp notifications (primary output)
-- ✅ SQLite database storage
+- ✅ MySQL database storage
 - ✅ Scheduled execution
 
 **Next milestone:** Scale up với advanced features, monitoring và production optimization!
