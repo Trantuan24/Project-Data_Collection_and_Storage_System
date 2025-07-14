@@ -6,21 +6,23 @@
 
 **MVP sẽ bao gồm:**
 - ✅ Đọc URLs từ Google Sheets
+- ✅ Nhận URLs từ WhatsApp messages (đơn giản)
 - ✅ Crawl nội dung tin tức cơ bản
 - ✅ Lưu vào SQLite database
 - ✅ Tóm tắt bằng OpenAI API
-- ✅ Gửi kết quả qua WhatsApp hoặc Email
+- ✅ Gửi kết quả qua WhatsApp (primary output)
 
 **Timeline:**
-- ⏰ Pre-requisites & Setup: 30 phút
-- ⏰ n8n Workflow Creation: 90 phút  
-- ⏰ Testing & Debugging: 60 phút
-- ⏰ Deployment & Validation: 30 phút
-- ⏰ Next Steps: 10 phút
+- ⏰ Pre-requisites & Setup: 45 phút
+- ⏰ WhatsApp Basic Setup: 60 phút
+- ⏰ n8n Workflow Creation: 120 phút
+- ⏰ Testing & Debugging: 90 phút
+- ⏰ Deployment & Validation: 45 phút
+- **Total:** 6 giờ (realistic cho MVP)
 
 ---
 
-## 🛠️ PHẦN 1: PRE-REQUISITES & SETUP (30 PHÚT)
+## 🛠️ PHẦN 1: PRE-REQUISITES & SETUP (45 PHÚT)
 
 ### ✅ Checklist Chuẩn Bị
 
@@ -67,25 +69,89 @@
 5. Copy và lưu API key (bắt đầu với `sk-`)
 6. Kiểm tra credit balance (cần ít nhất $1)
 
-**Bước 1.5: Setup WhatsApp (Optional - 5 phút)**
-> **Lưu ý:** Nếu phức tạp, sẽ dùng Email backup
+**Bước 1.5: Setup WhatsApp Business API (15 phút)**
+> **Lưu ý:** Đây là primary output channel cho MVP
 
-**Option A: WhatsApp Business API (Phức tạp)**
-- Cần Meta Developer Account
-- Verification process mất thời gian
-- **Recommendation:** Skip cho MVP, dùng Email
+**WhatsApp Business API Setup:**
+1. Truy cập: https://developers.facebook.com/
+2. Login và tạo **New App** > **Business**
+3. Add **WhatsApp** product
+4. Get **Temporary Access Token** (24h - đủ cho MVP testing)
+5. Get **Phone Number ID** từ WhatsApp settings
+6. Test API với curl:
+```bash
+curl -X POST "https://graph.facebook.com/v18.0/PHONE_NUMBER_ID/messages" \
+-H "Authorization: Bearer ACCESS_TOKEN" \
+-H "Content-Type: application/json" \
+-d '{
+  "messaging_product": "whatsapp",
+  "to": "YOUR_PHONE_NUMBER",
+  "type": "text",
+  "text": {"body": "Test message từ n8n"}
+}'
+```
 
-**Option B: Email Backup (Đơn giản)**
-1. Sử dụng Gmail SMTP
-2. Tạo App Password cho Gmail:
-   - Vào Google Account Settings
-   - Security > 2-Step Verification
-   - App passwords > Generate password
-   - Lưu password này
+**Webhook Setup (Optional cho input):**
+1. Sử dụng ngrok: `ngrok http 5678`
+2. Configure webhook URL trong Meta Console
+3. Set verify token: `your_verify_token`
 
 ---
 
-## 🔧 PHẦN 2: N8N WORKFLOW CREATION (90 PHÚT)
+## � PHẦN 2: WHATSAPP BASIC SETUP (60 PHÚT)
+
+### 🔧 WhatsApp Input Webhook (Optional - 30 phút)
+
+**Bước 2.1: Tạo WhatsApp Webhook Workflow (nếu muốn nhận URLs qua WhatsApp)**
+1. Tạo workflow mới: `WhatsApp Input Handler`
+2. Thêm **Webhook** node:
+   - Path: `/webhook/whatsapp`
+   - Method: POST
+3. Thêm **Function** node để extract URLs:
+```javascript
+// Extract URLs từ WhatsApp messages
+const body = $json.body;
+const items = [];
+
+if (body.entry && body.entry[0].changes && body.entry[0].changes[0].value.messages) {
+  const messages = body.entry[0].changes[0].value.messages;
+
+  for (const message of messages) {
+    const text = message.text?.body || '';
+    const from = message.from;
+
+    // Simple URL detection
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    const urls = text.match(urlRegex);
+
+    if (urls) {
+      for (const url of urls) {
+        items.push({
+          json: {
+            url: url,
+            source: 'whatsapp',
+            addedBy: from,
+            timestamp: new Date().toISOString()
+          }
+        });
+      }
+    }
+  }
+}
+
+return items;
+```
+
+**Bước 2.2: WhatsApp Output Setup (30 phút)**
+1. Test WhatsApp Business API connection trong n8n
+2. Tạo credential cho WhatsApp:
+   - Access Token: từ bước 1.5
+   - Phone Number ID: từ bước 1.5
+3. Test gửi message đơn giản
+
+---
+
+## �🔧 PHẦN 3: N8N WORKFLOW CREATION (120 PHÚT)
 
 ### 📊 Workflow 1: URL Collection từ Google Sheets (20 phút)
 
@@ -286,44 +352,42 @@ return [{
 
 ---
 
-## 📧 PHẦN 3: OUTPUT CONFIGURATION (Email Backup)
+## � PHẦN 4: WHATSAPP OUTPUT CONFIGURATION (20 PHÚT)
 
-### 📮 Setup Email Node (15 phút)
+### 📮 Setup WhatsApp Message Node (20 phút)
 
-**Bước 3.1: Thêm Email Node**
-1. Thêm **Send Email** node
+**Bước 4.1: Thêm WhatsApp Business Node**
+1. Thêm **WhatsApp Business** node
 2. Settings:
-   - **Credential**: Create new
-   - **SMTP Host**: smtp.gmail.com
-   - **SMTP Port**: 587
-   - **Secure**: Yes
-   - **Username**: your-email@gmail.com
-   - **Password**: App password từ bước 1.5
+   - **Credential**: Use credential từ bước 2.2
+   - **Resource**: Message
+   - **Operation**: Send Text
 
-**Bước 3.2: Configure Email Content**
+**Bước 4.2: Configure WhatsApp Message Content**
 ```javascript
-// Email settings
+// WhatsApp message settings
 {
-  "to": "recipient@gmail.com",
-  "subject": "📰 Tóm tắt tin tức ngày {{ $json.date }}",
-  "text": `
-Xin chào!
-
-Đây là bản tóm tắt tin tức tự động cho ngày {{ $json.date }}:
+  "messaging_product": "whatsapp",
+  "to": "YOUR_PHONE_NUMBER", // Replace với số điện thoại nhận
+  "type": "text",
+  "text": {
+    "body": `📰 *TÓM TẮT TIN TỨC NGÀY {{ $json.date }}*
 
 {{ $json.summary }}
 
 ---
-Tổng số bài viết đã xử lý: {{ $json.articleCount }}
-Thời gian tạo: {{ $json.generatedAt }}
+📊 Tổng số bài viết: {{ $json.articleCount }}
+⏰ Thời gian tạo: {{ $json.generatedAt }}
 
-Hệ thống tự động hóa tin tức
-  `,
-  "options": {
-    "priority": "normal"
+🤖 _Hệ thống tự động hóa tin tức_`
   }
 }
 ```
+
+**Bước 4.3: Test WhatsApp Delivery**
+1. Click **Test step** để gửi thử message
+2. Kiểm tra WhatsApp nhận được message
+3. Verify format hiển thị đúng
 
 ---
 
@@ -338,7 +402,7 @@ Hệ thống tự động hóa tin tức
    - **Cron Expression**: `0 8 * * *` (8:00 AM hàng ngày)
    - **Timezone**: Asia/Ho_Chi_Minh
 
-**Bước 4.2: Connect tất cả nodes**
+**Bước 5.2: Connect tất cả nodes**
 1. Kết nối các nodes theo thứ tự:
    - Schedule Trigger → Google Sheets
    - Google Sheets → Function (Process URLs)
@@ -348,7 +412,7 @@ Hệ thống tự động hóa tin tức
    - Function → SQLite
    - SQLite → OpenAI
    - OpenAI → Function (Format Summary)
-   - Function → Send Email
+   - Function → WhatsApp Business (Send Message)
 
 **Bước 4.3: Save Workflow**
 1. Click **Save**
@@ -356,7 +420,7 @@ Hệ thống tự động hóa tin tức
 
 ---
 
-## 🧪 PHẦN 5: TESTING & DEBUGGING (60 PHÚT)
+## 🧪 PHẦN 6: TESTING & DEBUGGING (90 PHÚT)
 
 ### 🔍 Test Individual Nodes (30 phút)
 
@@ -394,7 +458,7 @@ Hệ thống tự động hóa tin tức
    - Permission error: Kiểm tra write permissions
    - SQL syntax: Kiểm tra query format
 
-**Bước 5.5: Test AI Summarization**
+**Bước 6.5: Test AI Summarization**
 1. Click vào OpenAI node
 2. Click **Test step**
 3. **Expected Output**: Vietnamese summary text
@@ -403,13 +467,23 @@ Hệ thống tự động hóa tin tức
    - Rate limit: Đợi 1 phút và thử lại
    - No credits: Top up OpenAI account
 
-### 🔧 End-to-End Testing (30 phút)
+**Bước 6.6: Test WhatsApp Delivery**
+1. Click vào WhatsApp Business node
+2. Click **Test step**
+3. **Expected Output**: Success message
+4. **Troubleshooting**:
+   - Token error: Kiểm tra Access Token
+   - Phone number error: Verify Phone Number ID
+   - Message not received: Check phone number format
 
-**Bước 5.6: Manual Execution Test**
+### 🔧 End-to-End Testing (45 phút)
+
+**Bước 6.7: Manual Execution Test**
 1. Click **Execute Workflow** button
 2. Monitor execution trong **Executions** tab
 3. Kiểm tra từng step có success không
-4. Verify email được gửi thành công
+4. Verify WhatsApp message được nhận thành công
+5. Check message format và content
 
 **Bước 5.7: Debug Common Issues**
 
@@ -446,41 +520,45 @@ try {
 
 ---
 
-## 🚀 PHẦN 6: DEPLOYMENT & VALIDATION (30 PHÚT)
+## 🚀 PHẦN 7: DEPLOYMENT & VALIDATION (45 PHÚT)
 
-### ✅ Production Checklist (15 phút)
+### ✅ Production Checklist (25 phút)
 
-**Bước 6.1: Verify All Connections**
+**Bước 7.1: Verify All Connections**
 1. Google Sheets: ✅ Reading URLs successfully
-2. Web Crawling: ✅ Extracting content
-3. Database: ✅ Storing articles
-4. AI: ✅ Generating summaries
-5. Email: ✅ Sending notifications
+2. WhatsApp Input: ✅ Receiving URLs (if enabled)
+3. Web Crawling: ✅ Extracting content
+4. Database: ✅ Storing articles
+5. AI: ✅ Generating summaries
+6. WhatsApp Output: ✅ Sending notifications
 
-**Bước 6.2: Set Production Schedule**
+**Bước 7.2: Set Production Schedule**
 1. Adjust cron expression nếu cần:
    - `0 8,18 * * *` (8 AM và 6 PM)
    - `0 */6 * * *` (Mỗi 6 giờ)
 2. Click **Save** và **Activate**
 
-**Bước 6.3: Monitor First Runs**
+**Bước 7.3: Monitor First Runs**
 1. Vào **Executions** tab
 2. Watch for successful executions
-3. Check email inbox for summaries
+3. Check WhatsApp messages for summaries
+4. Verify message format và content
 
-### 📊 Success Validation (15 phút)
+### 📊 Success Validation (20 phút)
 
 **MVP Success Criteria:**
 - ✅ Workflow chạy không lỗi
 - ✅ Crawl được ít nhất 1 article
 - ✅ AI tạo được summary tiếng Việt
-- ✅ Email được gửi thành công
+- ✅ WhatsApp message được gửi thành công
 - ✅ Database lưu trữ data
+- ✅ WhatsApp input working (if enabled)
 
 **Performance Metrics:**
 - Execution time: < 5 phút
 - Success rate: > 80%
-- Email delivery: 100%
+- WhatsApp delivery: 100%
+- Message format: Professional và readable
 
 ---
 
@@ -584,17 +662,18 @@ SELECT * FROM articles ORDER BY created_at DESC LIMIT 5;
 
 ## 🎉 CONGRATULATIONS!
 
-Bạn đã hoàn thành MVP hệ thống tự động hóa tin tức!
+Bạn đã hoàn thành MVP hệ thống tự động hóa tin tức với WhatsApp integration!
 
 **What you've built:**
 - ✅ Automated news collection từ Google Sheets
+- ✅ WhatsApp input cho URLs (optional)
 - ✅ Web crawling và content extraction
 - ✅ AI-powered summarization
-- ✅ Email notifications
+- ✅ WhatsApp notifications (primary output)
 - ✅ SQLite database storage
 - ✅ Scheduled execution
 
-**Next milestone:** Scale up với WhatsApp integration và advanced features!
+**Next milestone:** Scale up với advanced features, monitoring và production optimization!
 
 ---
 
