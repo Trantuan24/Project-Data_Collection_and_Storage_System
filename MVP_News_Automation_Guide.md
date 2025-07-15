@@ -9,7 +9,7 @@
 - ✅ Nhận URLs từ WhatsApp messages (đơn giản)
 - ✅ Crawl nội dung tin tức cơ bản
 - ✅ Lưu vào MySQL database
-- ✅ Tóm tắt bằng OpenAI API
+- ✅ Tóm tắt bằng Google Gemini API (cost-effective)
 - ✅ Gửi kết quả qua WhatsApp (primary output)
 
 **Timeline:**
@@ -89,13 +89,34 @@
    - Username: n8n_user
    - Password: n8n_password
 
-**Bước 1.5: Đăng ký OpenAI API (8 phút)**
-1. Truy cập: https://platform.openai.com/
-2. Đăng ký account hoặc login
-3. Vào **API Keys** section
-4. Click **Create new secret key**
-5. Copy và lưu API key (bắt đầu với `sk-`)
-6. Kiểm tra credit balance (cần ít nhất $1)
+**Bước 1.5: Setup Google Gemini API (10 phút)**
+1. **Tạo Google Cloud Project:**
+   - Truy cập: https://console.cloud.google.com/
+   - Tạo project mới: `news-automation-gemini`
+   - Enable billing cho project (cần credit card)
+
+2. **Enable Gemini API:**
+   - Vào **APIs & Services** > **Library**
+   - Tìm "Generative Language API" (Gemini)
+   - Click **Enable**
+
+3. **Tạo API Key:**
+   - Vào **APIs & Services** > **Credentials**
+   - Click **Create Credentials** > **API Key**
+   - Copy API key (bắt đầu với `AIza`)
+   - **Restrict API key**: Chọn "Generative Language API"
+
+4. **Test API Connection:**
+   ```bash
+   curl -H 'Content-Type: application/json' \
+        -d '{"contents":[{"parts":[{"text":"Hello"}]}]}' \
+        -X POST 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=YOUR_API_KEY'
+   ```
+
+5. **Cost Structure:**
+   - **Gemini Pro**: $0.0005/1K characters (input), $0.0015/1K characters (output)
+   - **Much cheaper than OpenAI**: ~10x cost savings
+   - **Free tier**: 60 requests/minute
 
 **Bước 1.6: Setup WhatsApp Business API (15 phút)**
 > **Lưu ý:** Đây là primary output channel cho MVP
@@ -321,29 +342,41 @@ return items;
      - **CSS Selector**: title, h1
      - **Return Value**: Text
    - Thêm extraction value thứ 2:
-     - **Key**: content  
+     - **Key**: content
      - **CSS Selector**: p
      - **Return Value**: Text
      - **Return Array**: Yes
 
+**IMPORTANT**: HTML Extract node không automatically pass URL từ previous node. Chúng ta sẽ fix trong Clean Data function.
+
 **Bước 2.8: Thêm Function Node để clean data**
 ```javascript
-// Clean và format crawled data
+// Clean và format crawled data - lấy URL gốc từ Google Sheets
 const items = [];
 
-for (const item of $input.all()) {
-  const title = item.json.title || 'No title';
-  const contentArray = item.json.content || [];
-  
+// Get HTML Extract data (current input)
+const htmlItems = $input.all();
+
+// Get URL gốc từ Code node (Bước 2.4 - xử lý Google Sheets)
+const googleSheetsItems = $('Code').all();
+
+for (let i = 0; i < htmlItems.length; i++) {
+  const htmlItem = htmlItems[i];
+  const sheetsItem = googleSheetsItems[i]; // Corresponding Google Sheets item
+
+  const title = htmlItem.json.title || 'No title';
+  const contentArray = htmlItem.json.content || [];
+  const url = sheetsItem?.json?.url || 'No URL'; // URL gốc từ Google Sheets
+
   // Lấy 3 paragraphs đầu tiên
   const content = contentArray
     .slice(0, 3)
     .join(' ')
     .substring(0, 500) + '...';
-  
+
   items.push({
     json: {
-      url: item.json.url,
+      url: url,
       title: title,
       content: content,
       crawledAt: new Date().toISOString(),
@@ -355,88 +388,324 @@ for (const item of $input.all()) {
 return items;
 ```
 
-### 💾 Workflow 3: Database Storage (20 phút)
+### 💾 Workflow 3: Database Storage (10 phút)
 
-**Bước 3.9: Thêm MySQL Node**
-1. Thêm **MySQL** node
-2. Settings:
-   - **Credential**: Use credential từ bước 2.2
-   - **Operation**: Execute Query
-   - **Query**:
-```sql
-INSERT INTO articles (url, title, content, crawled_at, word_count)
-VALUES (?, ?, ?, ?, ?)
-ON DUPLICATE KEY UPDATE
-  title = VALUES(title),
-  content = VALUES(content),
-  crawled_at = VALUES(crawled_at),
-  word_count = VALUES(word_count);
-```
+**Bước 3.9: MySQL Node - Store Articles (10 phút)**
+1. Thêm **MySQL** node sau "Clean Data" function
+2. **Name**: "Store Articles"
 
-**Bước 3.10: Thêm Function Node để prepare SQL parameters**
+**Parameters Tab:**
+- **Credential**: MySQL account 2
+- **Operation**: Insert
+- **Table**: articles
+- **Columns**:
+  - url: `{{ $json.url }}`
+  - title: `{{ $json.title }}`
+  - content: `{{ $json.content }}`
+  - crawled_at: `{{ $json.crawledAt }}`
+  - word_count: `{{ $json.wordCount }}`
+
+**Options:**
+- **Add option** → **Skip on Conflict**: ✅ ON
+
+**Settings Tab:**
+- **Always Output Data**: ✅ ON
+- **Execute Once**: ❌ OFF
+- **Retry On Fail**: ❌ OFF
+
+**Bước 3.10: Function Node - Prepare for AI (5 phút)**
+1. Thêm **Function** node sau "Store Articles"
+2. **Name**: "Prepare AI Data"
+3. **Code**:
 ```javascript
-// Prepare data cho MySQL insertion
-const items = [];
+// Get original article data from Clean Data node (before MySQL)
+const cleanDataItems = $('Clean Data').all();
+const mysqlResults = $input.all();
 
-for (const item of $input.all()) {
-  items.push({
-    json: {
-      query: `INSERT INTO articles (url, title, content, crawled_at, word_count)
-              VALUES (?, ?, ?, ?, ?)
-              ON DUPLICATE KEY UPDATE
-                title = VALUES(title),
-                content = VALUES(content),
-                crawled_at = VALUES(crawled_at),
-                word_count = VALUES(word_count)`,
-      parameters: [
-        item.json.url,
-        item.json.title,
-        item.json.content,
-        item.json.crawledAt,
-        item.json.wordCount
-      ]
-    }
-  });
-}
+console.log(`Database: ${mysqlResults.length} articles processed`);
+console.log(`Clean Data: ${cleanDataItems.length} articles available`);
 
-return items;
-```
-
-### 🤖 Workflow 4: AI Summarization (25 phút)
-
-**Bước 2.11: Thêm OpenAI Node**
-1. Thêm **OpenAI** node
-2. Settings:
-   - **Credential**: Create new với API key từ bước 1.4
-   - **Resource**: Text
-   - **Operation**: Complete
-   - **Model**: gpt-3.5-turbo
-   - **Prompt**:
-```
-Tóm tắt các tin tức sau đây bằng tiếng Việt, ngắn gọn và dễ hiểu:
-
-{% for item in $input.all() %}
-Tiêu đề: {{ item.json.title }}
-Nội dung: {{ item.json.content }}
----
-{% endfor %}
-
-Hãy tạo một bản tóm tắt 3-5 câu về những tin tức quan trọng nhất.
-```
-
-**Bước 2.12: Thêm Function Node để format summary**
-```javascript
-// Format AI summary cho output
-const summary = $input.first().json.choices[0].message.content;
+// Use original article data from Clean Data node
+const articles = cleanDataItems
+  .filter(item => item.json.url && item.json.url !== 'No URL')
+  .map(item => ({
+    url: item.json.url,
+    title: item.json.title,
+    content: item.json.content,
+    wordCount: item.json.wordCount,
+    crawledAt: item.json.crawledAt
+  }));
 
 return [{
   json: {
-    summary: summary,
-    generatedAt: new Date().toISOString(),
-    articleCount: $input.all().length,
-    date: new Date().toLocaleDateString('vi-VN')
+    articles: articles,
+    articleCount: articles.length,
+    timestamp: new Date().toISOString(),
+    status: 'ready_for_ai'
   }
 }];
+```
+
+
+### 🤖 Workflow 4: AI Summarization - Individual Article Processing (25 phút)
+
+**Bước 4.1: Function Node - Prepare Individual Articles (5 phút)**
+1. Thêm **Function** node sau "Prepare AI Data"
+2. **Name**: "Split Articles for AI"
+3. **Code**:
+```javascript
+// Split articles array thành individual items để process riêng biệt
+const inputData = $input.first().json;
+const articles = inputData.articles || [];
+
+console.log(`Processing ${articles.length} articles individually`);
+
+// Return each article as separate item
+return articles.map((article, index) => ({
+  json: {
+    article: article,
+    articleIndex: index,
+    totalArticles: articles.length,
+    timestamp: inputData.timestamp
+  }
+}));
+```
+
+**Bước 4.2: Basic LLM Chain với Google Gemini - Generate Individual Summary (15 phút)**
+1. Thêm **Basic LLM Chain** node sau "Split Articles for AI"
+2. **Name**: "AI Summarize Individual"
+
+**Parameters Tab:**
+- **Source for Prompt (User Message)**: Define below
+- **Prompt (User Message)**:
+```
+Tóm tắt bài báo sau bằng tiếng Việt trong 2-3 câu ngắn gọn. Chỉ trả về nội dung tóm tắt, không thêm lời giới thiệu hay kết luận.
+
+Tiêu đề: {{$json.article.title}}
+
+Nội dung: {{$json.article.content}}
+
+Trả về trực tiếp nội dung tóm tắt bằng tiếng Việt, 2-3 câu, tập trung vào thông tin quan trọng nhất.
+```
+
+**Model Selection (scroll xuống):**
+- **Model**: Click dropdown → chọn **Google Gemini Chat Model**
+- **Credential**: Google Gemini(PaLM) Api account (từ bước 1.5)
+- **Model Name**: gemini-pro hoặc gemini-1.5-pro
+- **Options**:
+  - **Require Specific Output Format**: ❌ OFF
+  - **Enable Fallback Model**: ❌ OFF
+
+**Settings Tab:**
+- **Always Output Data**: ✅ ON
+- **Execute Once**: ❌ OFF (để process multiple articles)
+- **Retry On Fail**: ✅ ON (retry: 2 times)
+
+**Bước 4.3: Function Node - Collect Individual Summaries (5 phút)**
+1. Thêm **Function** node sau "AI Summarize Individual"
+2. **Name**: "Collect Summaries"
+3. **Code**:
+```javascript
+// Collect all individual summaries và combine thành final output
+const allSummaries = $input.all();
+
+console.log('=== COLLECT SUMMARIES DEBUG ===');
+console.log(`Collected ${allSummaries.length} individual summaries`);
+
+// Debug: Log first item structure để understand data flow
+if (allSummaries.length > 0) {
+  console.log('First item structure:', JSON.stringify(allSummaries[0], null, 2));
+}
+
+// Extract summaries và original article data
+const summariesWithArticles = allSummaries.map((item, index) => {
+  console.log(`Processing item ${index + 1}:`);
+
+  // Get original article data từ input (trước khi AI processing)
+  const originalData = $('Split Articles for AI').all()[index];
+  const originalArticle = originalData?.json?.article || {};
+
+  // Get AI response
+  const aiResponse = item.json;
+
+  console.log(`Article ${index + 1} - Title: ${originalArticle.title}`);
+  console.log(`Article ${index + 1} - URL: ${originalArticle.url}`);
+  console.log(`Article ${index + 1} - AI Response keys:`, Object.keys(aiResponse));
+
+  // Extract summary từ Basic LLM Chain response - try multiple fields
+  let summary = aiResponse.text ||
+                aiResponse.response ||
+                aiResponse.message ||
+                aiResponse.content ||
+                'Không thể tạo tóm tắt';
+
+  // Clean summary - remove AI conversation prefixes
+  if (summary && summary !== 'Không thể tạo tóm tắt') {
+    // Remove common AI prefixes
+    summary = summary
+      .replace(/^(Chắc chắn rồi\.|Dưới đây là|Tôi sẽ|Đây là).*?:/i, '')
+      .replace(/^(Bản tóm tắt|Tóm tắt).*?:/i, '')
+      .trim();
+  }
+
+  console.log(`Article ${index + 1} - Cleaned summary: ${summary.substring(0, 100)}...`);
+
+  return {
+    title: originalArticle.title || 'Không có tiêu đề',
+    url: originalArticle.url || '',
+    originalContent: originalArticle.content || '',
+    summary: summary.trim(),
+    wordCount: originalArticle.wordCount || 0,
+    crawledAt: originalArticle.crawledAt || new Date().toISOString()
+  };
+});
+
+// Create final output structure
+const finalOutput = {
+  summaries: summariesWithArticles,
+  totalArticles: summariesWithArticles.length,
+  successfulSummaries: summariesWithArticles.filter(s =>
+    s.summary !== 'Không thể tạo tóm tắt' &&
+    s.title !== 'Không có tiêu đề'
+  ).length,
+  timestamp: new Date().toISOString(),
+  status: 'summaries_ready'
+};
+
+console.log(`Final output: ${finalOutput.successfulSummaries}/${finalOutput.totalArticles} summaries successful`);
+console.log('Sample summary:', finalOutput.summaries[0]);
+
+return [{
+  json: finalOutput
+}];
+```
+
+**🔧 TROUBLESHOOTING Individual Article Summarization:**
+
+**1. Verify Split Articles Function:**
+- ✅ **Check "Split Articles for AI"** output có multiple items
+- ✅ **Each item** có structure: `{article: {...}, articleIndex: 0}`
+- ❌ **Không có empty articles**
+
+**2. Verify Basic LLM Chain Individual Processing:**
+- ✅ **AI Summarize Individual** node processes each article separately
+- ✅ **Template syntax** `{{$json.article.title}}` works correctly
+- ✅ **Multiple executions** cho multiple articles
+
+**3. Check Individual Article Input Structure:**
+```javascript
+// Each item từ "Split Articles for AI" should có format:
+{
+  "article": {
+    "url": "https://...",
+    "title": "...",
+    "content": "...",
+    "wordCount": 150,
+    "crawledAt": "2025-01-14T..."
+  },
+  "articleIndex": 0,
+  "totalArticles": 3,
+  "timestamp": "2025-01-14T..."
+}
+```
+
+**4. Test Google Gemini API Connection:**
+- Kiểm tra **Google Gemini(PaLM) Api account** credential trong Basic LLM Chain
+- Verify API key có sufficient quota
+- Test với simple prompt: "Hello" trước
+- Ensure model dropdown shows "Google Gemini Chat Model"
+
+**5. Debug Individual Processing:**
+- Click **"Execute step"** trên "Split Articles for AI" → should show multiple items
+- Click **"Execute step"** trên "AI Summarize Individual" → should process each item
+- Check console logs trong "Collect Summaries" để see final results
+
+**6. Common Fixes:**
+- **No multiple items**: Check "Split Articles for AI" function returns array
+- **Empty summaries**: Verify template `{{$json.article.title}}` syntax
+- **API quota exceeded**: Individual processing uses more API calls
+- **Timeout issues**: Add delay between API calls nếu cần
+
+**7. Data Quality Issues:**
+- **"Không có tiêu đề"**: Check "Split Articles for AI" output structure
+- **Empty URLs**: Verify original crawling data có URLs
+- **AI conversation prefixes**: Use cleaned prompt template
+- **Missing summaries**: Check Basic LLM Chain response fields
+
+**8. Performance Optimization:**
+- **Rate limiting**: Google Gemini có 60 requests/minute limit
+- **Batch size**: Process max 10 articles at once để avoid timeout
+- **Error handling**: Some articles có thể fail, others vẫn success
+
+**🔧 IMMEDIATE DEBUG STEPS:**
+1. **Add "Debug AI Responses" node** để check data flow
+2. **Check console logs** trong từng Function node
+3. **Verify original article data** từ crawling steps
+4. **Test với 1 article** trước khi process multiple
+
+**Bước 4.4: Debug Function Node - Check Data Quality (5 phút)**
+1. Thêm **Function** node sau "AI Summarize Individual" (trước "Collect Summaries")
+2. **Name**: "Debug AI Responses"
+3. **Code**:
+```javascript
+// Debug AI responses để check data quality
+const allResponses = $input.all();
+
+console.log('=== AI RESPONSES DEBUG ===');
+console.log(`Total responses: ${allResponses.length}`);
+
+allResponses.forEach((response, index) => {
+  console.log(`\n--- Response ${index + 1} ---`);
+  console.log('Full response:', JSON.stringify(response.json, null, 2));
+
+  // Check for AI response text
+  const text = response.json.text || response.json.response || response.json.message;
+  console.log(`Response text: ${text ? text.substring(0, 100) + '...' : 'EMPTY'}`);
+
+  // Check original article data
+  const originalData = $('Split Articles for AI').all()[index];
+  if (originalData) {
+    console.log(`Original title: ${originalData.json.article?.title || 'MISSING'}`);
+    console.log(`Original URL: ${originalData.json.article?.url || 'MISSING'}`);
+  }
+});
+
+// Pass through data unchanged
+return $input.all();
+```
+
+**Bước 4.5: Test Individual Summarization (5 phút)**
+1. **Execute "Split Articles for AI"** → should show multiple items (1 per article)
+2. **Execute "AI Summarize Individual"** → should process each article separately
+3. **Execute "Debug AI Responses"** → check console logs for data quality
+4. **Execute "Collect Summaries"** → should combine all summaries
+
+**Expected Final Output Structure:**
+```json
+{
+  "summaries": [
+    {
+      "title": "Báo VnExpress - Báo tiếng Việt nhiều người xem nhất",
+      "url": "https://vnexpress.net/...",
+      "originalContent": "Chính phủ vừa giao Bộ Khoa học...",
+      "summary": "Chính phủ giao Bộ KH&CN xây dựng đề án trọng dụng nhân tài chất lượng cao...",
+      "wordCount": 86,
+      "crawledAt": "2025-01-14T..."
+    },
+    {
+      "title": "Báo Tuổi Trẻ - Tin tức mới nhất...",
+      "url": "https://tuoitre.vn/...",
+      "originalContent": "Giám đốc Công an Hà Nội cho biết...",
+      "summary": "Công an Hà Nội dự kiến đến 18-12 sẽ lắp đủ camera AI...",
+      "wordCount": 35,
+      "crawledAt": "2025-01-14T..."
+    }
+  ],
+  "totalArticles": 2,
+  "successfulSummaries": 2,
+  "timestamp": "2025-01-14T15:30:00.000Z",
+  "status": "summaries_ready"
+}
 ```
 
 ---
@@ -445,38 +714,75 @@ return [{
 
 ### 📮 Setup WhatsApp Message Node (20 phút)
 
-**Bước 5.1: Thêm WhatsApp Business Node**
-1. Thêm **WhatsApp Business** node
+**Bước 5.1: Function Node - Format WhatsApp Message (5 phút)**
+1. Thêm **Function** node sau "Collect Summaries"
+2. **Name**: "Format WhatsApp Message"
+3. **Code**:
+```javascript
+// Format message cho WhatsApp với individual summaries
+const data = $input.first().json;
+const summaries = data.summaries || [];
+
+console.log(`Formatting WhatsApp message for ${summaries.length} summaries`);
+
+// Create formatted message với từng summary riêng biệt
+const summaryTexts = summaries.map((item, index) => {
+  const title = item.title ? item.title.substring(0, 40) : 'Không có tiêu đề';
+  const summary = item.summary || 'Không có tóm tắt';
+  const url = item.url || '';
+
+  return `📄 *Bài ${index + 1}: ${title}...*\n${summary}\n🔗 ${url}`;
+}).join('\n\n');
+
+const message = `📰 *TÓM TẮT TIN TỨC HÀNG NGÀY* 📰\n\n${summaryTexts}\n\n📊 *Thống kê:*\n• Tổng số bài: ${data.totalArticles}\n• Tóm tắt thành công: ${data.successfulSummaries}\n• Thời gian: ${new Date(data.timestamp).toLocaleString('vi-VN')}\n\n🤖 _Tin tức được tự động tóm tắt bởi AI - Mỗi bài có summary riêng biệt_`;
+
+console.log('WhatsApp message formatted successfully');
+console.log('Message length:', message.length);
+
+return [{
+  json: {
+    whatsapp_message: message,
+    summaryCount: summaries.length,
+    messageLength: message.length
+  }
+}];
+```
+
+**Bước 5.2: Thêm WhatsApp Business Node**
+1. Thêm **WhatsApp Business** node sau "Format WhatsApp Message"
 2. Settings:
    - **Credential**: Use credential từ bước 2.2
    - **Resource**: Message
    - **Operation**: Send Text
+   - **To**: YOUR_PHONE_NUMBER (replace với số điện thoại nhận)
+   - **Message**: `{{$json.whatsapp_message}}`
 
-**Bước 5.2: Configure WhatsApp Message Content**
-```javascript
-// WhatsApp message settings
-{
-  "messaging_product": "whatsapp",
-  "to": "YOUR_PHONE_NUMBER", // Replace với số điện thoại nhận
-  "type": "text",
-  "text": {
-    "body": `📰 *TÓM TẮT TIN TỨC NGÀY {{ $json.date }}*
+**Bước 5.3: Test Individual Summarization Workflow**
+1. **Execute "Split Articles for AI"** → verify multiple items output
+2. **Execute "AI Summarize Individual"** → check each article gets summarized
+3. **Execute "Collect Summaries"** → verify all summaries collected
+4. **Execute "Format WhatsApp Message"** → check message format
+5. **Execute "WhatsApp Business"** → test delivery
 
-{{ $json.summary }}
-
----
-📊 Tổng số bài viết: {{ $json.articleCount }}
-⏰ Thời gian tạo: {{ $json.generatedAt }}
-
-🤖 _Hệ thống tự động hóa tin tức_`
-  }
-}
+**Expected WhatsApp Message Format:**
 ```
+📰 *TÓM TẮT TIN TỨC HÀNG NGÀY* 📰
 
-**Bước 5.3: Test WhatsApp Delivery**
-1. Click **Test step** để gửi thử message
-2. Kiểm tra WhatsApp nhận được message
-3. Verify format hiển thị đúng
+📄 *Bài 1: Báo VnExpress - Báo tiếng Việt nhiều...*
+Chính phủ giao Bộ KH&CN xây dựng đề án trọng dụng nhân tài chất lượng cao cho khoa học công nghệ, trình Thủ tướng trong tháng 9. Đây là nhiệm vụ cụ thể hóa Nghị quyết 57 của Bộ Chính trị.
+🔗 https://vnexpress.net/xay-dung-de-an-trong-dung-nhan-tai-khoa-hoc-cong-nghe-4913987.html
+
+📄 *Bài 2: Báo Tuổi Trẻ - Tin tức mới nhất...*
+Công an Hà Nội dự kiến đến 18-12 sẽ lắp đủ camera AI để giao thông không cần cảnh sát giao thông nữa.
+🔗 https://tuoitre.vn/...
+
+📊 *Thống kê:*
+• Tổng số bài: 2
+• Tóm tắt thành công: 2
+• Thời gian: 14/01/2025, 15:30:00
+
+🤖 _Tin tức được tự động tóm tắt bởi AI - Mỗi bài có summary riêng biệt_
+```
 
 ---
 
@@ -499,9 +805,12 @@ return [{
    - HTTP Request → HTML Extract
    - HTML Extract → Function (Clean Data)
    - Function → MySQL
-   - MySQL → OpenAI
-   - OpenAI → Function (Format Summary)
-   - Function → WhatsApp Business (Send Message)
+   - MySQL → Function (Prepare AI Data)
+   - Prepare AI Data → Function (Split Articles for AI)
+   - Split Articles for AI → Basic LLM Chain (AI Summarize Individual)
+   - AI Summarize Individual → Function (Collect Summaries)
+   - Collect Summaries → Function (Format WhatsApp Message)
+   - Format WhatsApp Message → WhatsApp Business (Send Message)
 
 **Bước 4.3: Save Workflow**
 1. Click **Save**
@@ -549,13 +858,13 @@ return [{
    - SQL syntax: Kiểm tra MySQL query format
 
 **Bước 6.5: Test AI Summarization**
-1. Click vào OpenAI node
+1. Click vào Google Gemini node
 2. Click **Test step**
 3. **Expected Output**: Vietnamese summary text
 4. **Troubleshooting**:
-   - API key error: Kiểm tra key format
-   - Rate limit: Đợi 1 phút và thử lại
-   - No credits: Top up OpenAI account
+   - API key error: Kiểm tra Gemini API key format
+   - Rate limit: Đợi 1 phút và thử lại (60 requests/minute limit)
+   - Quota exceeded: Check Google Cloud billing
 
 **Bước 6.6: Test WhatsApp Delivery**
 1. Click vào WhatsApp Business node
@@ -594,8 +903,8 @@ try {
 ```
 
 **Issue 2: Empty AI Summary**
-- Check OpenAI credits
-- Verify prompt format
+- Check Google Gemini API quota
+- Verify prompt format for Gemini
 - Test with simpler prompt
 
 **Issue 3: Email not sending**
@@ -706,12 +1015,13 @@ Solution:
 - Re-download credentials JSON
 ```
 
-**3. "OpenAI API rate limit exceeded"**
+**3. "Google Gemini API quota exceeded"**
 ```
 Solution:
-- Đợi 1 phút và retry
-- Upgrade OpenAI plan
-- Add delay giữa requests
+- Đợi 1 phút và retry (60 requests/minute limit)
+- Check Google Cloud billing status
+- Add delay giữa requests (1-2 seconds)
+- Consider upgrading to paid tier for higher limits
 ```
 
 **4. "HTTP Request timeout"**
