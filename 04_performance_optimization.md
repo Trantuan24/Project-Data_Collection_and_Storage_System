@@ -177,47 +177,151 @@ DB_POOL_SIZE = min(20, os.cpu_count() * 2)  # Connection pool sizing
 - **I/O Scaling**: Optimized database operations for high throughput
 - **Network Scaling**: Efficient concurrent network operations
 
-## Performance Monitoring
+## Performance Monitoring with Existing Logs
 
-### Real-Time Metrics Collection
+### Current Logging Capabilities
 
-**Key Performance Indicators (KPIs)**:
-```python
-# Performance metrics tracking
-performance_metrics = {
-    'execution_time': 45.67,           # Total execution time
-    'backup_time': 32.1,               # HTML backup duration
-    'parse_time': 12.3,                # Data parsing duration
-    'db_time': 1.2,                    # Database operations duration
-    'success_rate': 0.992,             # Overall success rate
-    'jobs_processed': 125,             # Total jobs processed
-    'memory_peak': 87.5,               # Peak memory usage (MB)
-    'cpu_utilization': 0.65            # Average CPU utilization
-}
+**Log Files and Locations**:
+```bash
+# Main crawler execution logs
+logs/processing.log              # Primary crawler operations
+logs/etl.log                    # ETL pipeline operations
+logs/db_ingest.log              # Database operations
+logs/dag_id=crawl_topcv_jobs/   # Airflow DAG execution logs
 ```
 
-**Monitoring Dashboard Metrics**:
-- **Throughput**: Jobs processed per hour/day
-- **Latency**: Component-level execution times
-- **Error Rates**: Success/failure rates by component
-- **Resource Usage**: CPU, memory, disk, network utilization
+**Key Performance Indicators in Logs**:
+```bash
+# Execution time tracking
+grep "execution_time" logs/processing.log | tail -10
 
-### Performance Alerting
+# Success rates analysis
+grep "successful" logs/processing.log | tail -20
 
-**Alert Thresholds**:
-```yaml
-# Performance alert configuration
-alerts:
-  execution_time:
-    warning: 75    # seconds
-    critical: 90   # seconds
-  
-  success_rate:
-    warning: 0.95  # 95%
-    critical: 0.90 # 90%
-  
-  memory_usage:
-    warning: 150   # MB
+# Database operation performance
+grep "inserted\|updated" logs/db_ingest.log | tail -10
+
+# Error pattern analysis
+grep "ERROR\|FAILED" logs/processing.log | tail -20
+```
+
+**Log Analysis Examples**:
+```bash
+# Daily success rate calculation
+TODAY=$(date +%Y-%m-%d)
+TOTAL_RUNS=$(grep "$TODAY" logs/processing.log | grep -c "Bắt đầu crawl")
+SUCCESSFUL_RUNS=$(grep "$TODAY" logs/processing.log | grep -c "success.*true")
+echo "Success rate: $((SUCCESSFUL_RUNS * 100 / TOTAL_RUNS))%"
+
+# Average execution time
+grep "execution_time" logs/processing.log | \
+  awk -F'execution_time: ' '{print $2}' | \
+  awk '{sum+=$1; count++} END {print "Average:", sum/count, "seconds"}'
+
+# Most common errors
+grep "ERROR" logs/processing.log | \
+  cut -d: -f3- | sort | uniq -c | sort -nr | head -5
+
+# Jobs processed per day
+grep "$(date +%Y-%m-%d)" logs/processing.log | \
+  grep "total_jobs" | \
+  awk -F'total_jobs: ' '{sum+=$2} END {print "Jobs today:", sum}'
+```
+
+### Health Monitoring with Existing Tools
+
+**Database Health Checks**:
+```sql
+-- Check recent crawl activity
+SELECT COUNT(*) as recent_jobs, MAX(crawled_at) as last_crawl
+FROM raw_jobs
+WHERE crawled_at > NOW() - INTERVAL '24 hours';
+
+-- Check data quality indicators
+SELECT
+    COUNT(*) as total_jobs,
+    COUNT(CASE WHEN title IS NOT NULL THEN 1 END) as jobs_with_title,
+    COUNT(CASE WHEN company_name IS NOT NULL THEN 1 END) as jobs_with_company,
+    COUNT(CASE WHEN title IS NOT NULL AND company_name IS NOT NULL THEN 1 END) as complete_jobs
+FROM raw_jobs
+WHERE crawled_at > NOW() - INTERVAL '24 hours';
+
+-- Check for duplicate detection
+SELECT job_id, COUNT(*) as duplicates
+FROM raw_jobs
+WHERE crawled_at > NOW() - INTERVAL '24 hours'
+GROUP BY job_id
+HAVING COUNT(*) > 1;
+```
+
+**File System Health Checks**:
+```bash
+# Check backup files (should have recent files)
+find data/raw_backup -name "*.html" -mtime -1 | wc -l
+
+# Check CDC files (should have recent activity)
+find data/cdc -name "*.jsonl" -mtime -1 | wc -l
+
+# Check disk usage
+du -sh data/
+df -h | grep -E "(data|logs)"
+
+# Check log file sizes (detect log rotation needs)
+ls -lh logs/*.log | awk '{print $5, $9}'
+```
+
+**Process Health Monitoring**:
+```bash
+# Check Airflow DAG status
+docker-compose exec airflow airflow dags state crawl_topcv_jobs $(date +%Y-%m-%d)
+
+# Check database connections
+docker-compose exec postgres psql -U jobinsight -c "
+SELECT count(*) as active_connections, state
+FROM pg_stat_activity
+WHERE datname='jobinsight'
+GROUP BY state;"
+
+# Check system resources
+docker stats --no-stream | grep -E "(jobinsight|postgres)"
+
+# Check for memory leaks
+ps aux | grep python | grep crawler | awk '{print $6, $11}' | sort -n
+```
+
+### Performance Alerting Patterns
+
+**Log-based Alert Patterns**:
+```bash
+# High error rate detection
+ERROR_COUNT=$(grep "$(date +%Y-%m-%d)" logs/processing.log | grep -c "ERROR")
+if [ $ERROR_COUNT -gt 5 ]; then
+    echo "ALERT: High error rate detected: $ERROR_COUNT errors today"
+fi
+
+# Long execution time detection
+LONG_RUNS=$(grep "execution_time" logs/processing.log | \
+           awk -F'execution_time: ' '$2 > 90 {print $2}' | wc -l)
+if [ $LONG_RUNS -gt 0 ]; then
+    echo "ALERT: $LONG_RUNS runs exceeded 90 seconds"
+fi
+
+# Low success rate detection
+TOTAL_RUNS=$(grep "$(date +%Y-%m-%d)" logs/processing.log | grep -c "Bắt đầu crawl")
+SUCCESS_RUNS=$(grep "$(date +%Y-%m-%d)" logs/processing.log | grep -c "success.*true")
+if [ $TOTAL_RUNS -gt 0 ]; then
+    SUCCESS_RATE=$((SUCCESS_RUNS * 100 / TOTAL_RUNS))
+    if [ $SUCCESS_RATE -lt 90 ]; then
+        echo "ALERT: Low success rate: $SUCCESS_RATE%"
+    fi
+fi
+
+# Circuit breaker activation detection
+CIRCUIT_BREAKS=$(grep "$(date +%Y-%m-%d)" logs/processing.log | grep -c "Circuit Breaker triggered")
+if [ $CIRCUIT_BREAKS -gt 0 ]; then
+    echo "ALERT: Circuit breaker activated $CIRCUIT_BREAKS times today"
+fi
+```
     critical: 200  # MB
   
   parse_failures:
