@@ -491,30 +491,164 @@ def crawl_and_process_task(**kwargs):
     return result
 ```
 
-### Custom Integration Example
+### Practical Usage Examples
 
-**Standalone Usage**:
+#### **Basic TopCVCrawler Usage**
 ```python
 from src.crawler.crawler import TopCVCrawler
 
-# Basic usage
-crawler = TopCVCrawler()
-result = crawler.run()
+# Simple crawl with defaults
+result = TopCVCrawler.run()
+print(f"Success: {result['success']}")
+print(f"Jobs parsed: {result['parse']['total_jobs']}")
 
 # Custom configuration
 config = {
-    'num_pages': 10,
-    'use_parallel': True,
-    'enable_cdc': True
+    'num_pages': 3,           # Crawl 3 pages instead of default 5
+    'use_parallel': False,    # Sequential processing
+    'db_table': 'raw_jobs',   # Target table
+    'enable_cdc': True        # Enable change data capture
 }
 result = TopCVCrawler.run(config=config)
 
-# Process results
+# Error handling
 if result['success']:
-    print(f"Successfully processed {result['parse']['total_jobs']} jobs")
-    print(f"Execution time: {result['execution_time']:.2f} seconds")
+    print(f"Backup: {result['backup']['successful']}/{result['backup']['total']}")
+    print(f"Database: {result['database']['inserted']} inserted")
 else:
-    print("Crawler execution failed")
+    print(f"Error: {result.get('error', 'Unknown error')}")
+```
+
+#### **HTMLBackupManager Usage**
+```python
+from src.crawler.backup_manager import HTMLBackupManager
+import asyncio
+
+async def backup_example():
+    config = {
+        'concurrent_backups': 3,
+        'min_delay': 3,
+        'max_delay': 6
+    }
+    manager = HTMLBackupManager(config)
+
+    # Sequential backup
+    results = await manager.backup_html_pages(3, parallel=False)
+    print(f"Backed up {len(results)} pages")
+
+    # Parallel backup
+    results = await manager.backup_html_pages_parallel(5)
+    successful = sum(1 for r in results if r.get('success'))
+    print(f"Parallel backup: {successful}/{len(results)} successful")
+
+# Run the example
+asyncio.run(backup_example())
+```
+
+#### **TopCVParser Usage**
+```python
+from src.crawler.parser import TopCVParser
+import pandas as pd
+
+# Initialize parser
+parser = TopCVParser()
+
+# Parse single file
+jobs = parser.parse_html_file('data/raw_backup/it_p1_20250127154513.html')
+print(f"Parsed {len(jobs)} jobs from single file")
+
+# Parse multiple files
+html_files = [
+    'data/raw_backup/it_p1_20250127154513.html',
+    'data/raw_backup/it_p2_20250127154513.html'
+]
+df = parser.parse_multiple_files(html_files)
+print(f"Total jobs parsed: {len(df)}")
+
+# Access parsed data
+if not df.empty:
+    print("Sample job data:")
+    print(df[['title', 'company_name', 'location']].head())
+```
+
+#### **Error Handling Patterns**
+```python
+from src.crawler.crawler import TopCVCrawler
+import logging
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def robust_crawl():
+    try:
+        config = {
+            'num_pages': 5,
+            'use_parallel': True,
+            'db_table': 'raw_jobs',
+            'enable_cdc': True
+        }
+
+        result = TopCVCrawler.run(config=config)
+
+        if result['success']:
+            logger.info(f"Crawl successful: {result['parse']['total_jobs']} jobs")
+
+            # Check for warnings
+            if result['backup']['failed'] > 0:
+                logger.warning(f"Some pages failed: {result['backup']['failed']}")
+
+            return result
+        else:
+            logger.error(f"Crawl failed: {result.get('error')}")
+            return None
+
+    except Exception as e:
+        logger.error(f"Critical error: {e}")
+        return None
+
+# Usage
+result = robust_crawl()
+if result:
+    print("Crawl completed successfully")
+```
+
+#### **Configuration Examples**
+```python
+# Development configuration
+dev_config = {
+    'num_pages': 2,
+    'use_parallel': False,
+    'concurrent_backups': 1,
+    'min_delay': 2,
+    'max_delay': 4,
+    'enable_cdc': False
+}
+
+# Production configuration
+prod_config = {
+    'num_pages': 5,
+    'use_parallel': True,
+    'concurrent_backups': 3,
+    'min_delay': 3,
+    'max_delay': 6,
+    'enable_cdc': True,
+    'db_table': 'raw_jobs'
+}
+
+# Testing configuration
+test_config = {
+    'num_pages': 1,
+    'use_parallel': False,
+    'concurrent_backups': 1,
+    'min_delay': 1,
+    'max_delay': 2,
+    'enable_cdc': False,
+    'db_table': 'test_jobs'
+}
+
+# Usage
+result = TopCVCrawler.run(config=prod_config)
 ```
 
 ## Monitoring API
