@@ -61,8 +61,8 @@ The HTMLBackupManager implements sophisticated web scraping capabilities using P
 ### Anti-Detection Engineering
 
 **User-Agent Management**:
-- **Pool Size**: 40+ realistic user agents
-- **Distribution**: 70% Desktop, 30% Mobile (optimized for detection avoidance)
+- **Pool Size**: Multiple realistic user agents
+- **Distribution**: 80% Desktop, 20% Mobile (optimized for detection avoidance)
 - **Rotation Strategy**: Randomized selection with session persistence
 - **Fingerprint Consistency**: Matching viewport sizes and platform indicators
 
@@ -234,9 +234,9 @@ The UserAgentManager provides sophisticated browser fingerprinting management wi
 ### User-Agent Pool Management
 
 **Curated Agent Pool**:
-- **Desktop Agents**: 28 realistic Chrome/Firefox/Safari combinations
-- **Mobile Agents**: 12 realistic mobile browser configurations
-- **Distribution Strategy**: 70% Desktop, 30% Mobile (optimized for detection avoidance)
+- **Desktop Agents**: Multiple realistic Chrome/Firefox/Safari combinations
+- **Mobile Agents**: Multiple realistic mobile browser configurations
+- **Distribution Strategy**: 80% Desktop, 20% Mobile (optimized for detection avoidance)
 - **Update Strategy**: Regular updates to maintain current browser versions
 
 ### Viewport Coordination
