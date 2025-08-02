@@ -13,7 +13,7 @@ The JobInsight Crawler System is an enterprise-grade, production-ready data pipe
 - **Optimized Backup**: 30-40 seconds for 5-page crawling (recently optimized from 59s)
 
 ### 🛡️ **Advanced Anti-Detection**
-- **User-Agent Rotation**: 40+ realistic agents (70% Desktop, 30% Mobile)
+- **User-Agent Rotation**: Multiple realistic agents (80% Desktop, 20% Mobile)
 - **Fingerprint Masking**: Advanced browser fingerprinting evasion
 - **Intelligent Delays**: Randomized 3-6 second intervals with jitter
 - **Circuit Breaker**: Automatic pause mechanism on detection patterns
