@@ -86,6 +86,243 @@ AIRFLOW__CORE__EXECUTOR=LocalExecutor
 AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql://jobinsight:jobinsight@postgres:5432/jobinsight
 ```
 
+### Configuration Templates
+
+#### **Development Environment (.env.development)**
+```bash
+# Database Configuration
+DB_HOST=localhost
+DB_PORT=5432
+DB_USER=jobinsight
+DB_PASSWORD=jobinsight
+DB_NAME=jobinsight
+
+# Crawler Settings - Conservative for development
+CRAWLER_NUM_PAGES=2          # Small number for testing
+CRAWLER_MIN_DELAY=2          # Shorter delays for faster testing
+CRAWLER_MAX_DELAY=4
+MAX_WORKERS=3                # Fewer workers for development
+CONCURRENT_BACKUPS=1         # Sequential processing
+
+# Directories
+BACKUP_DIR=./data/raw_backup
+CDC_DIR=./data/cdc
+
+# CDC Settings
+CDC_DAYS_TO_KEEP=7           # Shorter retention for development
+CDC_LOCK_TIMEOUT=5
+
+# Logging
+LOG_LEVEL=DEBUG              # Verbose logging for development
+```
+
+#### **Production Environment (.env.production)**
+```bash
+# Database Configuration
+DB_HOST=postgres-cluster.internal
+DB_PORT=5432
+DB_USER=jobinsight_prod
+DB_PASSWORD=${DB_PASSWORD_SECRET}
+DB_NAME=jobinsight_prod
+
+# Connection Pool Settings
+DB_POOL_SIZE=20
+DB_MAX_OVERFLOW=30
+
+# Crawler Settings - Optimized for production
+CRAWLER_NUM_PAGES=5          # Full page crawling
+CRAWLER_MIN_DELAY=3          # Balanced delays
+CRAWLER_MAX_DELAY=6
+MAX_WORKERS=10               # Full worker utilization
+CONCURRENT_BACKUPS=3         # Parallel processing
+
+# Anti-Detection Settings
+CRAWLER_PAGE_LOAD_TIMEOUT=60000
+CRAWLER_SELECTOR_TIMEOUT=20000
+CRAWLER_MAX_RETRY=3
+
+# Directories
+BACKUP_DIR=/app/data/raw_backup
+CDC_DIR=/app/data/cdc
+
+# CDC Settings
+CDC_DAYS_TO_KEEP=30          # Longer retention for production
+CDC_LOCK_TIMEOUT=10
+
+# Logging
+LOG_LEVEL=INFO               # Standard logging for production
+
+# Airflow Production Settings
+AIRFLOW__CORE__EXECUTOR=CeleryExecutor
+AIRFLOW__CELERY__BROKER_URL=redis://redis-cluster:6379/0
+AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://jobinsight_prod:${DB_PASSWORD_SECRET}@postgres-cluster.internal:5432/jobinsight_prod
+```
+
+#### **Testing Environment (.env.testing)**
+```bash
+# Database Configuration
+DB_HOST=localhost
+DB_PORT=5433                 # Different port for test database
+DB_USER=jobinsight_test
+DB_PASSWORD=jobinsight_test
+DB_NAME=jobinsight_test
+
+# Crawler Settings - Minimal for testing
+CRAWLER_NUM_PAGES=1          # Single page for unit tests
+CRAWLER_MIN_DELAY=1          # Minimal delays for fast tests
+CRAWLER_MAX_DELAY=2
+MAX_WORKERS=1                # Single worker for predictable tests
+CONCURRENT_BACKUPS=1         # Sequential processing
+
+# Directories
+BACKUP_DIR=./tests/data/raw_backup
+CDC_DIR=./tests/data/cdc
+
+# CDC Settings
+CDC_DAYS_TO_KEEP=1           # Minimal retention for tests
+CDC_LOCK_TIMEOUT=5
+
+# Logging
+LOG_LEVEL=WARNING            # Minimal logging for tests
+```
+
+#### **Docker Compose Template (docker-compose.yml)**
+```yaml
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_DB: jobinsight
+      POSTGRES_USER: jobinsight
+      POSTGRES_PASSWORD: jobinsight
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jobinsight"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  jobinsight:
+    build: .
+    environment:
+      - DB_HOST=postgres
+      - CRAWLER_NUM_PAGES=5
+      - CRAWLER_MIN_DELAY=3
+      - CRAWLER_MAX_DELAY=6
+      - MAX_WORKERS=10
+      - CONCURRENT_BACKUPS=3
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped
+
+  airflow-webserver:
+    build: .
+    command: airflow webserver
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql://jobinsight:jobinsight@postgres:5432/jobinsight
+      - AIRFLOW__CORE__DEFAULT_TIMEZONE=Asia/Ho_Chi_Minh
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+
+  airflow-scheduler:
+    build: .
+    command: airflow scheduler
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql://jobinsight:jobinsight@postgres:5432/jobinsight
+      - AIRFLOW__CORE__DEFAULT_TIMEZONE=Asia/Ho_Chi_Minh
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+
+volumes:
+  postgres_data:
+```
+
+#### **Production Docker Compose (docker-compose.production.yml)**
+```yaml
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_DB: jobinsight_prod
+      POSTGRES_USER: jobinsight_prod
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets:
+      - db_password
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+      - ./sql:/docker-entrypoint-initdb.d
+    networks:
+      - jobinsight_network
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+
+  jobinsight:
+    image: jobinsight:latest
+    environment:
+      - DB_HOST=postgres
+      - DB_PASSWORD_FILE=/run/secrets/db_password
+      - CRAWLER_NUM_PAGES=5
+      - LOG_LEVEL=INFO
+    secrets:
+      - db_password
+    depends_on:
+      - postgres
+    volumes:
+      - jobinsight_data:/app/data
+      - jobinsight_logs:/app/logs
+    networks:
+      - jobinsight_network
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+secrets:
+  db_password:
+    external: true
+
+volumes:
+  postgres_prod_data:
+  jobinsight_data:
+  jobinsight_logs:
+
+networks:
+  jobinsight_network:
+    driver: overlay
+```
+
 ### Configuration Classes
 
 **Hierarchical Configuration Structure**:
