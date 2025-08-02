@@ -7,10 +7,10 @@ The **JobInsight Crawler System** represents a sophisticated, enterprise-grade d
 ### 🏆 **System Achievements**
 
 **Performance Excellence**:
-- **99%+ Success Rate** in production environments
-- **125+ Job Postings** processed daily with zero manual intervention
-- **33% Performance Improvement** achieved through recent optimizations (59s → 30-40s)
-- **Stable Memory Usage** with eliminated memory leaks through advanced engineering
+- **High Success Rate** in typical operating conditions
+- **Scalable Processing** with configurable job volume per run
+- **Optimized Performance** through concurrent processing and intelligent delays
+- **Stable Memory Usage** with automated cleanup mechanisms
 
 **Technical Sophistication**:
 - **Advanced Anti-Detection**: 40+ user agents, fingerprint masking, intelligent delays
@@ -175,24 +175,24 @@ This technical documentation suite is designed to serve both **fresher Data Engi
 
 ## 📊 **System Metrics Dashboard**
 
-### **Current Performance Indicators**
+### **Current Performance Characteristics**
 ```
 ┌─────────────────────┬─────────────┬─────────────┬─────────────┐
-│ Metric              │ Current     │ Target      │ Status      │
+│ Metric              │ Typical     │ Target      │ Status      │
 ├─────────────────────┼─────────────┼─────────────┼─────────────┤
-│ Daily Success Rate  │ 99%+        │ >95%        │ ✅ Excellent│
-│ Jobs Processed/Day  │ 125+        │ 100+        │ ✅ Excellent│
-│ Execution Time      │ 30-40s      │ <60s        │ ✅ Excellent│
-│ Memory Usage        │ 50-100MB    │ <200MB      │ ✅ Excellent│
-│ Error Rate          │ <1%         │ <5%         │ ✅ Excellent│
+│ Page Success Rate   │ 95-99%      │ >90%        │ ✅ Good     │
+│ Jobs per Run        │ 50-100+     │ 50+         │ ✅ Good     │
+│ Execution Time      │ 45-60s      │ <90s        │ ✅ Good     │
+│ Memory Usage        │ 50-100MB    │ <200MB      │ ✅ Good     │
+│ Parse Success       │ 95-98%      │ >90%        │ ✅ Good     │
 └─────────────────────┴─────────────┴─────────────┴─────────────┘
 ```
 
-### **Recent Optimization Achievements**
-- **Backup Speed**: 33% improvement (59s → 30-40s)
-- **Memory Management**: Eliminated memory leaks (stable 50-100MB usage)
-- **Code Quality**: Removed 150+ lines of dead code
-- **Parse Success**: Improved from 95% to 98%+ with enhanced debugging
+### **Recent System Improvements**
+- **Backup Performance**: Optimized concurrent processing and delays
+- **Memory Management**: Implemented cleanup mechanisms for stable usage
+- **Code Quality**: Refactored and removed deprecated code
+- **Parse Reliability**: Enhanced error handling and debugging capabilities
 
 ## 🔗 **Additional Resources**
 
@@ -213,7 +213,79 @@ This technical documentation suite is designed to serve both **fresher Data Engi
 
 ---
 
-## 📝 **Documentation Maintenance**
+## � **Quick Troubleshooting Guide**
+
+### **Common Issues and Solutions**
+
+#### **1. Parsing Failures**
+**Symptoms**: "Found X job items but parsed 0 jobs"
+```bash
+# Diagnosis: Check HTML structure changes
+head -n 200 data/raw_backup/it_p1_*.html | grep "job-item-2"
+
+# Solution: Test parser directly
+python -c "
+from src.crawler.parser import TopCVParser
+parser = TopCVParser()
+result = parser.parse_html_file('data/raw_backup/it_p1_*.html')
+print(f'Parsed {len(result)} jobs')
+"
+```
+
+#### **2. Anti-Detection Issues**
+**Symptoms**: Captcha detection, blocked requests
+```bash
+# Diagnosis: Check logs for captcha detection
+grep "captcha\|blocked" logs/processing.log
+
+# Solution: Adjust delays and user-agent rotation
+# Edit .env file:
+CRAWLER_MIN_DELAY=5
+CRAWLER_MAX_DELAY=10
+```
+
+#### **3. Database Connection Problems**
+**Symptoms**: Connection refused, timeout errors
+```bash
+# Diagnosis: Check PostgreSQL status
+docker ps | grep postgres
+
+# Solution: Verify environment variables
+python -c "
+from src.utils.db import get_connection
+try:
+    with get_connection() as conn:
+        print('✅ Database connection successful')
+except Exception as e:
+    print(f'❌ Database connection failed: {e}')
+"
+```
+
+#### **4. Memory Issues**
+**Symptoms**: Growing memory usage, slow performance
+```bash
+# Diagnosis: Check memory usage
+ps aux | grep python | grep crawler
+
+# Solution: Verify cleanup is working
+grep "cleanup_processed_ids" logs/processing.log
+```
+
+#### **5. Circuit Breaker Triggers**
+**Symptoms**: "Circuit Breaker triggered" messages
+```bash
+# Diagnosis: Check failure patterns
+grep "Circuit Breaker" logs/processing.log
+
+# Solution: Reduce concurrent processing
+# Edit .env file:
+CONCURRENT_BACKUPS=2
+CRAWLER_NUM_PAGES=3
+```
+
+---
+
+## �📝 **Documentation Maintenance**
 
 This documentation suite is actively maintained and updated to reflect system improvements and optimizations. Last updated: January 2025.
 
